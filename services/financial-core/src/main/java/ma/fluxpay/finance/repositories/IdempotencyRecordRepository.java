@@ -1,10 +1,11 @@
-package ma.fluxpay.finance.domain.repositories;
+package ma.fluxpay.finance.repositories;
 
 import jakarta.persistence.LockModeType;
 import ma.fluxpay.finance.domain.entities.IdempotencyRecord;
 import ma.fluxpay.finance.domain.enums.IdempotencyStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -40,4 +41,25 @@ public interface IdempotencyRecordRepository
         @Param("key") String key,
         @Param("operationType") String operationType
     );
+
+
+    @Modifying
+    @Query("""
+    UPDATE IdempotencyRecord i
+    SET i.status = :status,
+        i.responseCode = :responseCode,
+        i.responseBody = :responseBody,
+        i.updatedAt = CURRENT_TIMESTAMP
+    WHERE i.idempotencyKey = :key
+      AND i.operationType = :operationType
+      AND i.status = ma.fluxpay.finance.domain.enums.IdempotencyStatus.PROCESSING
+""")
+    int finishProcessing(
+        @Param("key") String key,
+        @Param("operationType") String operationType,
+        @Param("status") IdempotencyStatus status,
+        @Param("responseCode") Integer responseCode,
+        @Param("responseBody") String responseBody
+    );
+
 }

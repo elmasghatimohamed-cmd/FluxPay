@@ -1,10 +1,11 @@
-package ma.fluxpay.finance.domain.repositories;
+package ma.fluxpay.finance.repositories;
 
 import jakarta.persistence.LockModeType;
 import ma.fluxpay.finance.domain.entities.FundsReservation;
 import ma.fluxpay.finance.domain.enums.ReservationStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -29,4 +30,19 @@ public interface FundsReservationRepository
     Optional<FundsReservation> findByIdForUpdate(
         @Param("id") UUID id
     );
+
+
+    @Modifying
+    @Query("""
+    UPDATE FundsReservation r
+    SET r.status = :newStatus,
+        r.updatedAt = CURRENT_TIMESTAMP
+    WHERE r.id = :id
+      AND r.status = ma.fluxpay.finance.domain.enums.ReservationStatus.ACTIVE
+""")
+    int transitionFromActive(
+        @Param("id") UUID id,
+        @Param("newStatus") ReservationStatus newStatus
+    );
+
 }

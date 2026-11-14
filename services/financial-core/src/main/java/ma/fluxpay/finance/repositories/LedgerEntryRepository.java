@@ -1,4 +1,4 @@
-package ma.fluxpay.finance.domain.repositories;
+package ma.fluxpay.finance.repositories;
 
 import ma.fluxpay.finance.domain.entities.LedgerEntry;
 import ma.fluxpay.finance.domain.enums.EntrySide;
