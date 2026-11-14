@@ -1,0 +1,111 @@
+name: Infrastructure CI
+
+on:
+  push:
+    branches: [develop, main, "feature/**", "fix/**", "test/**"]
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  infrastructure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FLUXPAY_ENV: ${{ runner.temp }}/fluxpay-ci.env
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Generate temporary test credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          {
+            echo "POSTGRES_USER=fluxpay_admin"
+            echo "POSTGRES_DB=postgres"
+            echo "POSTGRES_PORT=15432"
+            echo "KAFKA_EXTERNAL_PORT=19092"
+            for service in transfer finance risk notification; do
+              prefix="${service^^}"
+              echo "${prefix}_DB_NAME=${service}_db"
+              echo "${prefix}_DB_USER=${service}_app"
+            done
+          } > "$FLUXPAY_ENV"
+          for key in POSTGRES_PASSWORD TRANSFER_DB_PASSWORD FINANCE_DB_PASSWORD RISK_DB_PASSWORD NOTIFICATION_DB_PASSWORD; do
+            password="$(openssl rand -hex 24)"
+            echo "::add-mask::$password"
+            printf "%s=%s\n" "$key" "$password" >> "$FLUXPAY_ENV"
+          done
+
+      - name: Start PostgreSQL and Kafka
+        shell: bash
+        run: |
+          set -euo pipefail
+          dc=(docker compose --env-file "$FLUXPAY_ENV" -f infrastructure/compose/compose.yaml)
+          "${dc[@]}" config --quiet
+          "${dc[@]}" up -d --wait --wait-timeout 180
+          "${dc[@]}" ps
+
+      - name: Verify database authentication and isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose --env-file "$FLUXPAY_ENV" -f infrastructure/compose/compose.yaml exec -T postgres bash -s <<'BASH'
+          set -euo pipefail
+          for service in TRANSFER FINANCE RISK NOTIFICATION; do
+            db_var="${service}_DB_NAME"
+            user_var="${service}_DB_USER"
+            password_var="${service}_DB_PASSWORD"
+            database="${!db_var}"
+            username="${!user_var}"
+            export PGPASSWORD="${!password_var}"
+            psql -h 127.0.0.1 -U "$username" -d "$database" -w -v ON_ERROR_STOP=1 -c "SELECT current_user, current_database();"
+            for target in TRANSFER FINANCE RISK NOTIFICATION; do
+              if [ "$service" = "$target" ]; then continue; fi
+              target_var="${target}_DB_NAME"
+              if psql -h 127.0.0.1 -U "$username" -d "${!target_var}" -w -c "SELECT 1;" >/dev/null 2>&1; then
+                echo "FAIL: $service can access $target"
+                exit 1
+              fi
+            done
+            echo "PASS: $service authentication and isolation"
+          done
+          BASH
+
+      - name: Verify Kafka publication and consumption
+        shell: bash
+        run: |
+          set -euo pipefail
+          dc=(docker compose --env-file "$FLUXPAY_ENV" -f infrastructure/compose/compose.yaml)
+          topic="fluxpay.smoke.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          message="fluxpay-${GITHUB_SHA}"
+          "${dc[@]}" exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --topic "$topic" --partitions 1 --replication-factor 1
+          printf "%s\n" "$message" | "${dc[@]}" exec -T kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka:29092 --topic "$topic" --command-property acks=all
+          received="$("${dc[@]}" exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:29092 --topic "$topic" --from-beginning --max-messages 1 --timeout-ms 20000)"
+          test "$received" = "$message"
+          echo "PASS: Kafka publication and consumption"
+          "${dc[@]}" exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --delete --topic "$topic"
+
+      - name: Show infrastructure logs on failure
+        if: ${{ failure() }}
+        run: docker compose --env-file "$FLUXPAY_ENV" -f infrastructure/compose/compose.yaml logs --no-color --tail 100
+
+      - name: Clean up CI resources
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          trap 'rm -f "$FLUXPAY_ENV"' EXIT
+          if [ -f "$FLUXPAY_ENV" ]; then
+            docker compose --env-file "$FLUXPAY_ENV" -f infrastructure/compose/compose.yaml down --volumes --remove-orphans
+          fi
