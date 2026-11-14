@@ -1,2 +1,17 @@
 server:
   address: 127.0.0.1
+
+spring:
+  datasource:
+    url: ${FINANCE_JDBC_URL}
+    username: ${FINANCE_DB_USER}
+    password: ${FINANCE_DB_PASSWORD}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
