@@ -18,10 +18,11 @@ jobs:
   infrastructure:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      FLUXPAY_ENV: ${{ runner.temp }}/fluxpay-ci.env
-
     steps:
+      - name: Configure CI environment path
+        shell: bash
+        run: echo "FLUXPAY_ENV=$RUNNER_TEMP/fluxpay-ci.env" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
