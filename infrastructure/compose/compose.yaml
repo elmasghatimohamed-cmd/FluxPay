@@ -1,0 +1,67 @@
+name: fluxpay
+
+services:
+  postgres:
+    image: postgres:18.7
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Required}
+      POSTGRES_DB: ${POSTGRES_DB:?Required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Required}
+      TRANSFER_DB_NAME: ${TRANSFER_DB_NAME:?Required}
+      TRANSFER_DB_USER: ${TRANSFER_DB_USER:?Required}
+      TRANSFER_DB_PASSWORD: ${TRANSFER_DB_PASSWORD:?Required}
+      FINANCE_DB_NAME: ${FINANCE_DB_NAME:?Required}
+      FINANCE_DB_USER: ${FINANCE_DB_USER:?Required}
+      FINANCE_DB_PASSWORD: ${FINANCE_DB_PASSWORD:?Required}
+      RISK_DB_NAME: ${RISK_DB_NAME:?Required}
+      RISK_DB_USER: ${RISK_DB_USER:?Required}
+      RISK_DB_PASSWORD: ${RISK_DB_PASSWORD:?Required}
+      NOTIFICATION_DB_NAME: ${NOTIFICATION_DB_NAME:?Required}
+      NOTIFICATION_DB_USER: ${NOTIFICATION_DB_USER:?Required}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?Required}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:?Required}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./postgres/init-services.sh:/docker-entrypoint-initdb.d/10-services.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  kafka:
+    image: apache/kafka:4.2.2
+    hostname: kafka
+    ports:
+      - "127.0.0.1:${KAFKA_EXTERNAL_PORT:?Required}:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:29093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:${KAFKA_EXTERNAL_PORT:?Required}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  kafka_data:
